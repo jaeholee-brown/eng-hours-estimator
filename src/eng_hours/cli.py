@@ -65,6 +65,7 @@ def main(argv: list[str] | None = None) -> int:
     pb.add_argument("--limit", type=int, default=None)
     pb.add_argument("--models", default=None, help="comma-separated model keys")
     pb.add_argument("--gemini-chunk", type=int, default=200)
+    pb.add_argument("--openai-chunk", type=int, default=3000)
 
     ps = sub.add_parser("spend", help="actual cost spent so far, per model (from token usage)")
     ps.add_argument("repo", nargs="?")
@@ -116,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.submit:
             keys = args.models.split(",") if args.models else None
             batchmod.submit(cfg, repo, model_keys=keys, limit=args.limit,
-                            gemini_chunk=args.gemini_chunk)
+                            gemini_chunk=args.gemini_chunk, openai_chunk=args.openai_chunk)
         elif args.collect:
             batchmod.collect(cfg, repo)
         else:

@@ -70,7 +70,10 @@ class OpenAIProvider:
         )
         kwargs = dict(base)
         if reasoning == "off":
-            kwargs["reasoning_effort"] = "minimal"
+            # gpt-5.x reasoning models expose "none" for no reasoning ("minimal"
+            # is rejected by gpt-5.4-mini). If a model rejects "none", the
+            # bad-param retry below drops it and falls back to the default.
+            kwargs["reasoning_effort"] = "none"
         if temperature is not None:
             kwargs["temperature"] = temperature
 

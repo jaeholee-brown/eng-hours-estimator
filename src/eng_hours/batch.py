@@ -82,7 +82,7 @@ def _chunks(seq, n):
 
 
 # ── submit ───────────────────────────────────────────────────────────────────
-def submit(cfg, repo, *, model_keys=None, limit=None, gemini_chunk=200) -> dict:
+def submit(cfg, repo, *, model_keys=None, limit=None, gemini_chunk=200, openai_chunk=3000) -> dict:
     models, by_model = _remaining(cfg, repo, model_keys, limit)
     if not by_model:
         print("[batch] nothing remaining to submit — all pairs already judged.")
@@ -101,7 +101,8 @@ def submit(cfg, repo, *, model_keys=None, limit=None, gemini_chunk=200) -> dict:
         if m.provider == "anthropic":
             entries.append(_submit_anthropic(cfg, m, todo, mt, temp))
         elif m.provider == "openai":
-            entries.append(_submit_openai(cfg, m, todo, mt))
+            for ch in _chunks(todo, openai_chunk):
+                entries.append(_submit_openai(cfg, m, ch, mt))
         elif m.provider == "google":
             for ch in _chunks(todo, gemini_chunk):
                 entries.append(_submit_gemini(cfg, m, ch, mt, temp))
@@ -154,7 +155,7 @@ def _submit_openai(cfg, m, todo, max_tokens) -> dict:
             "max_completion_tokens": max_tokens,
         }
         if m.reasoning == "off":
-            body["reasoning_effort"] = "minimal"
+            body["reasoning_effort"] = "none"  # gpt-5.x: "none" disables reasoning ("minimal" is rejected)
         lines.append(json.dumps({"custom_id": str(pr["number"]), "method": "POST",
                                  "url": "/v1/chat/completions", "body": body}))
     data = ("\n".join(lines)).encode()
@@ -282,25 +283,34 @@ def _collect_openai(e):
     b = client.batches.retrieve(e["batch_id"])
     if b.status in ("validating", "in_progress", "finalizing"):
         return None, b.status
-    if b.status in ("failed", "expired", "cancelled"):
-        return [], b.status  # nothing to write; mark collected so we stop polling
-    text = client.files.content(b.output_file_id).text
     recs = []
-    for line in text.splitlines():
-        if not line.strip():
-            continue
-        o = json.loads(line)
-        number = int(o["custom_id"])
-        resp = o.get("response") or {}
-        if resp.get("status_code") == 200:
-            body = resp["body"]
-            content = body["choices"][0]["message"].get("content") or ""
-            usage = body.get("usage", {})
-            recs.append(_mk_record(e["model_key"], number, content,
-                                   usage.get("prompt_tokens"), usage.get("completion_tokens")))
-        else:
-            recs.append({"number": number, "model_key": e["model_key"], "hours": None,
-                         "error": f"batch_http:{resp.get('status_code')}"})
+    # Successful requests land in the output file …
+    if getattr(b, "output_file_id", None):
+        for line in client.files.content(b.output_file_id).text.splitlines():
+            if not line.strip():
+                continue
+            o = json.loads(line)
+            number = int(o["custom_id"])
+            resp = o.get("response") or {}
+            if resp.get("status_code") == 200:
+                body = resp["body"]
+                content = body["choices"][0]["message"].get("content") or ""
+                usage = body.get("usage", {})
+                recs.append(_mk_record(e["model_key"], number, content,
+                                       usage.get("prompt_tokens"), usage.get("completion_tokens")))
+            else:
+                recs.append({"number": number, "model_key": e["model_key"], "hours": None,
+                             "error": f"batch_http:{resp.get('status_code')}"})
+    # … failed requests land in the error file (record them so we don't re-poll forever).
+    if getattr(b, "error_file_id", None):
+        for line in client.files.content(b.error_file_id).text.splitlines():
+            if not line.strip():
+                continue
+            o = json.loads(line)
+            resp = o.get("response") or {}
+            msg = ((resp.get("body") or {}).get("error") or {}).get("message", "")
+            recs.append({"number": int(o["custom_id"]), "model_key": e["model_key"],
+                         "hours": None, "error": f"batch_http:{resp.get('status_code')}:{msg[:120]}"})
     return recs, b.status
 
 

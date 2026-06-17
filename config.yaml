@@ -22,7 +22,7 @@ extract:
   # The diff (net patch) is taken from local git — free and fast. Cap its size fed
   # to the judge to control token cost; the largest diffs get truncated with a
   # marker. ~50 KB keeps full diffs for ~75-80% of Codex PRs.
-  max_diff_chars: 50000
+  max_diff_chars: 250000
   # Cap how many branch-commit messages are included in the prompt.
   max_commit_messages: 40
   # Fetch the real PR branch commits (authors + dates) via GitHub GraphQL so the
