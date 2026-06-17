@@ -57,6 +57,15 @@ def main(argv: list[str] | None = None) -> int:
     pa = sub.add_parser("analyze", help="ensemble + contributor-day aggregation")
     pa.add_argument("repo", nargs="?")
 
+    pb = sub.add_parser("batch", help="run the REMAINING judge calls via the Batch API (50%% cheaper, async)")
+    pb.add_argument("repo", nargs="?")
+    pb.add_argument("--submit", action="store_true", help="submit remaining pairs as batches")
+    pb.add_argument("--collect", action="store_true", help="poll + write any finished batch results")
+    pb.add_argument("--status", action="store_true", help="show submitted batch jobs")
+    pb.add_argument("--limit", type=int, default=None)
+    pb.add_argument("--models", default=None, help="comma-separated model keys")
+    pb.add_argument("--gemini-chunk", type=int, default=200)
+
     ps = sub.add_parser("spend", help="actual cost spent so far, per model (from token usage)")
     ps.add_argument("repo", nargs="?")
 
@@ -100,6 +109,18 @@ def main(argv: list[str] | None = None) -> int:
         from .judge import judge_repo
         keys = args.models.split(",") if args.models else None
         asyncio.run(judge_repo(cfg, repo, model_keys=keys, limit=args.limit))
+    elif args.cmd == "batch":
+        from . import batch as batchmod
+        if args.status:
+            batchmod.status(cfg, repo)
+        elif args.submit:
+            keys = args.models.split(",") if args.models else None
+            batchmod.submit(cfg, repo, model_keys=keys, limit=args.limit,
+                            gemini_chunk=args.gemini_chunk)
+        elif args.collect:
+            batchmod.collect(cfg, repo)
+        else:
+            raise SystemExit("specify one of --submit / --collect / --status")
     elif args.cmd == "spend":
         from .cost import actual_cost
         actual_cost(cfg, repo)

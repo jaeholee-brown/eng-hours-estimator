@@ -203,4 +203,16 @@ def load_prs(cfg: cfgmod.Config, repo_name: str) -> list[dict]:
     path = cfg.data_dir(repo_name) / "prs.jsonl"
     if not path.exists():
         raise FileNotFoundError(f"{path} not found — run `extract` first")
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    recs = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    # A PR number can appear on more than one commit (cherry-pick / re-land). Keep
+    # the first occurrence (newest, since git log is newest-first) so every PR is
+    # unique across judging, batching, and analysis.
+    seen: set[int] = set()
+    out = []
+    for r in recs:
+        n = r["number"]
+        if n in seen:
+            continue
+        seen.add(n)
+        out.append(r)
+    return out
