@@ -1,0 +1,33 @@
+# ── Secrets ───────────────────────────────────────────────────────────────
+.env
+*.key
+
+# ── Analyzed repos (dropped/symlinked into repos/; never commit their content)
+repos/*
+!repos/README.md
+!repos/.gitkeep
+
+# ── Generated data & outputs ────────────────────────────────────────────────
+data/*
+!data/.gitkeep
+*.jsonl
+*.parquet
+plots/
+out/
+
+# ── Python ──────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+*.egg-info/
+.ipynb_checkpoints/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ── OS / editor ───────────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/

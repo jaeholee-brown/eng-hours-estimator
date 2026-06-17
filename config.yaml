@@ -1,0 +1,94 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# eng-hours-estimator configuration
+#
+# LLM-as-a-judge estimation of the human-equivalent engineering hours behind each
+# merged PR, ensembled across three models, then aggregated into contributor-day
+# metrics. Everything here is overridable; nothing model-specific is hard-coded.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Repos to analyze. Each entry is a folder under `repos/` (a clone or a symlink).
+# To add a repo later: drop/symlink it under repos/<name> and add an entry here
+# (or rely on auto-discovery: any git repo under repos/ is picked up if `repos`
+# is left empty). `github` is owner/repo, used to fetch PR branch commits.
+repos:
+  - name: codex
+    path: repos/codex          # resolved relative to the project root; symlinks ok
+    github: openai/codex       # owner/repo for the GraphQL branch-commit fetch
+
+# ── Extraction ──────────────────────────────────────────────────────────────
+extract:
+  # Identify a merged PR from a squash/merge commit subject ending in "(#1234)".
+  pr_number_regex: '\(#(\d+)\)\s*$'
+  # The diff (net patch) is taken from local git — free and fast. Cap its size fed
+  # to the judge to control token cost; the largest diffs get truncated with a
+  # marker. ~50 KB keeps full diffs for ~75-80% of Codex PRs.
+  max_diff_chars: 50000
+  # Cap how many branch-commit messages are included in the prompt.
+  max_commit_messages: 40
+  # Fetch the real PR branch commits (authors + dates) via GitHub GraphQL so the
+  # contributor-day spread is accurate. If false, only the squash commit is used
+  # (every PR collapses to a single contributor-day).
+  fetch_branch_commits: true
+
+# ── GitHub API (speed-optimized branch-commit fetch) ─────────────────────────
+# Diffs are local, so the API is only used for commit metadata. GraphQL batches
+# many PRs per request; bounded concurrency + header-aware backoff respects the
+# 5000 points/hr primary limit and the ~900 points/min + 100-concurrent secondary
+# limits. See README "GitHub rate limits".
+github:
+  graphql_batch_size: 25       # PRs aliased into a single GraphQL query
+  max_concurrency: 6           # concurrent in-flight GraphQL queries
+  commits_per_pr: 100          # branch commits fetched per PR (first N)
+  min_remaining_points: 200    # pause when remaining rate-limit points drop below this
+
+# ── Models (the ensemble) ────────────────────────────────────────────────────
+# Pricing is USD per 1,000,000 tokens. Update if rates change — the cost
+# estimate reads these directly. `reasoning: "off"` means no extended thinking.
+models:
+  - key: haiku-4.5
+    provider: anthropic
+    model: claude-haiku-4-5
+    price_in: 1.00
+    price_out: 5.00
+    reasoning: "off"
+    max_concurrency: 80        # assume max-tier ratelimits
+
+  - key: gpt-5.4-mini
+    provider: openai
+    model: gpt-5.4-mini
+    price_in: 0.75
+    price_out: 4.50
+    reasoning: "off"             # sets reasoning_effort=minimal
+    max_concurrency: 80
+
+  - key: gemini-3-flash
+    provider: google
+    model: gemini-3-flash-preview
+    price_in: 0.50
+    price_out: 3.00
+    reasoning: "off"             # sets thinking_level=low / thinking_budget=0
+    max_concurrency: 80
+
+# ── Judge call settings ───────────────────────────────────────────────────────
+judge:
+  max_output_tokens: 1500      # room to "talk out loud" then emit the final line
+  temperature: 0.0            # where the provider still accepts it
+  retries: 5                   # exponential backoff on rate limit / transient errors
+  # The model talks out loud, then ends with a line we parse:
+  final_marker: 'FINAL_ESTIMATE_HOURS'
+
+# ── Ensembling & analysis ────────────────────────────────────────────────────
+analyze:
+  # How to combine the 3 model estimates into one number per PR.
+  ensemble: median             # median | mean | trimmed_mean
+  # Treat these authors as bots and (optionally) exclude them.
+  bot_email_patterns:
+    - 'dependabot'
+    - '\[bot\]'
+    - 'github-actions'
+  exclude_bots: true
+  # A "contributor-day" (c, d) is a distinct (author, calendar-day). A PR's hours
+  # are split evenly across the distinct contributor-days its commits touch
+  # (branch commits + the merge commit), per the project definition.
+  allocation: even_contributor_days
+  hours_per_day_threshold: 24  # for the ">24h/day" graph
